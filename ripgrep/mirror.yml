@@ -83,11 +83,10 @@ assets:
     - "^ripgrep-.*-x86_64-unknown-linux-musl\\.tar\\.gz$"
   "linux/arm64+libc.glibc":
     - "^ripgrep-.*-aarch64-unknown-linux-gnu\\.tar\\.gz$"
-  # PASS 2 — darwin. Uncomment together with the darwin `platforms:` keys.
-  # darwin/amd64:
-  #   - "^ripgrep-.*-x86_64-apple-darwin\\.tar\\.gz$"
-  # darwin/arm64:
-  #   - "^ripgrep-.*-aarch64-apple-darwin\\.tar\\.gz$"
+  darwin/amd64:
+    - "^ripgrep-.*-x86_64-apple-darwin\\.tar\\.gz$"
+  darwin/arm64:
+    - "^ripgrep-.*-aarch64-apple-darwin\\.tar\\.gz$"
   # PASS 3 — windows. Uncomment together with the windows `platforms:` keys.
   # windows/amd64:
   #   - "^ripgrep-.*-x86_64-pc-windows-msvc\\.zip$"
