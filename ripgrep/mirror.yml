@@ -1,0 +1,155 @@
+# ⚠ `extends:` is a SHALLOW merge of TOP-LEVEL KEYS. Setting a key here
+# REPLACES the base's block outright — there is no per-key merge. `platforms:`
+# is deliberately NOT restated below: it carries the container legs that make
+# this spec's libc claims honest, and restating it to tweak one runner would
+# drop them all without reddening anything. This repo is single-package, so the
+# measured matrix lives in the base and nothing here touches it.
+extends: ../mirror-base.yml
+
+name: ripgrep
+
+# Logical index package `ripgrep/ripgrep` at the physical path
+# `ghcr.io/ocx-contrib/ripgrep/ripgrep` — slash segments, never
+# hyphen-flattened. Two segments always; `BurntSushi` is a personal handle, not
+# a vendor, so the tool names itself. The first segment must be this repo's own
+# GitHub owner: GITHUB_TOKEN only authorises packages owned by the repo the
+# workflow runs in.
+target:
+  registry: ghcr.io
+  repository: ocx-contrib/ripgrep/ripgrep
+
+source:
+  type: github_release
+  owner: BurntSushi
+  repo: ripgrep
+  # ripgrep tags are bare semver — no "v" prefix (e.g. "15.2.0").
+  tag_pattern: "^(?P<version>\\d+\\.\\d+\\.\\d+)$"
+
+# ─── libc gate (Phase 3.5) — the evidence, not the conclusion ───────────────
+#
+# `os.features` states what an artifact REQUIRES OF THE HOST. Measured on BOTH
+# ends of the range, per arch — the two Linux keys differ because the linkage
+# does, not because the filenames do:
+#
+#   $ file ripgrep-15.2.0-x86_64-unknown-linux-musl/rg
+#   ELF 64-bit LSB pie executable, x86-64, static-pie linked, stripped
+#   $ readelf -l … | grep -c INTERP  → 0     (also 0 on 15.0.0)
+#   $ readelf -d … | grep -c NEEDED  → 0     (also 0 on 15.0.0)
+#     ⇒ musl is linked IN, not linked AGAINST → requires nothing → BARE
+#       `linux/amd64`. `+libc.musl` would be a false requirement that hid the
+#       package from every glibc host it in fact runs on.
+#
+#   $ file ripgrep-15.2.0-aarch64-unknown-linux-gnu/rg
+#   ELF 64-bit LSB pie executable, ARM aarch64, dynamically linked,
+#   interpreter /lib/ld-linux-aarch64.so.1, for GNU/Linux 3.7.0, stripped
+#   $ readelf -d … | grep NEEDED
+#     libgcc_s.so.1  libpthread.so.0  libdl.so.2  libc.so.6  ld-linux-aarch64.so.1
+#   $ readelf -V … | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1  → GLIBC_2.18
+#     (identical on 15.0.0)
+#     ⇒ genuinely requires a glibc userland → `"linux/arm64+libc.glibc"`,
+#       quoted so the `+` stays a key character. NO alpine leg on that key: the
+#       binary cannot load under musl, and the renderer rejects the leg at
+#       exit 65.
+#
+# ─── Scope (verified against 15.0.0, the floor, 15.1.0 and 15.2.0) ──────────
+#
+# Each of the patterns below matches EXACTLY ONE asset on EVERY one of the
+# three in-range releases (checked with anchored `grep -cE` against the full
+# per-release asset list). A pattern matching ZERO is silently skipped, not an
+# error — it would yield a green run with a missing platform.
+#
+# Two asset-set flips inside this range, both handled by which variant is
+# declared rather than by a floor bump:
+#   • `aarch64-unknown-linux-musl` is NEW in 15.2.0 and absent at 15.0.0 and
+#     15.1.0. The gnu aarch64 asset spans the whole range, so that is the one
+#     carried. (Once 15.2.0 is the floor, a bare `linux/arm64` fed by
+#     `^ripgrep-.*-aarch64-unknown-linux-musl\.tar\.gz$` could be published
+#     ALONGSIDE the glibc key — specificity scoring hands each host its own
+#     build. Not worth a version-windowed platform today.)
+#   • `i686-unknown-linux-gnu` shipped at 15.0.0/15.1.0 and was DROPPED in
+#     15.2.0 — moot, i686 has no OCX platform key.
+#
+# Upstream also publishes, and this mirror deliberately does not carry:
+#   armv7-unknown-linux-{gnueabihf,musleabihf,musleabi}  — no OCX linux/arm key
+#   s390x-unknown-linux-gnu                              — no OCX platform
+#   i686-unknown-linux-gnu, i686-pc-windows-msvc         — no OCX platform
+#   x86_64-pc-windows-gnu                                — msvc is the one carried
+#   ripgrep_<ver>-1_amd64.deb, *.sha256                  — sidecars
+#
+# The anchored ^…$ regexes are what keep those out — `.deb` and every
+# `.sha256` sidecar fail the terminating `\.tar\.gz$` / `\.zip$`.
+assets:
+  linux/amd64:
+    - "^ripgrep-.*-x86_64-unknown-linux-musl\\.tar\\.gz$"
+  "linux/arm64+libc.glibc":
+    - "^ripgrep-.*-aarch64-unknown-linux-gnu\\.tar\\.gz$"
+  # PASS 2 — darwin. Uncomment together with the darwin `platforms:` keys.
+  # darwin/amd64:
+  #   - "^ripgrep-.*-x86_64-apple-darwin\\.tar\\.gz$"
+  # darwin/arm64:
+  #   - "^ripgrep-.*-aarch64-apple-darwin\\.tar\\.gz$"
+  # PASS 3 — windows. Uncomment together with the windows `platforms:` keys.
+  # windows/amd64:
+  #   - "^ripgrep-.*-x86_64-pc-windows-msvc\\.zip$"
+  # windows/arm64:
+  #   - "^ripgrep-.*-aarch64-pc-windows-msvc\\.zip$"
+
+# Every archive — tarball and zip alike — is a single
+# `ripgrep-<version>-<triple>/` wrapper holding `rg` (`rg.exe` on Windows,
+# mode 0755) at its ROOT, beside doc/, complete/, COPYING, UNLICENSE,
+# LICENSE-MIT and README.md. One strip_components: 1 therefore serves every
+# platform and the executable lands at the content root, so a single
+# metadata.json (PATH = ${installPath}) serves all of them too.
+asset_type:
+  type: archive
+  strip_components: 1
+
+# `off` — FORCED by the layout above, not chosen. After the strip the bundle's
+# only PATH entry is a bare ${installPath}; the scan only inspects an
+# interface-visible `${installPath}/<dir>` entry, so with no subdirectory to
+# point one at both `auto` and `verify` fail spec load at exit 65:
+#
+#   bin_scan is enabled but metadata.json declares no interface-visible
+#   ${installPath}/<dir> PATH entry — the verification would inspect no file and
+#   pass green whatever the archive contains.
+#
+# The `binaries` list in metadata.json is therefore hand-maintained, exactly as
+# that error directs. It is short and stable: `rg` is the only mode-0755 entry
+# in the archive; doc/, complete/ and the licences are all 0644 data. Quoted so
+# no YAML 1.1 reader folds the bare word into boolean `false`.
+bin_scan: "off"
+
+metadata:
+  default: metadata.json
+
+catalog:
+  logo: logo.svg
+
+versions:
+  # 15.0.0 is the floor: it is where the current asset naming and archive
+  # layout stabilised, and every release from it up is complete (no in-range
+  # release is missing a declared platform's asset — an asset-less release
+  # inside the range is dropped SILENTLY by the pipeline).
+  min: "15.0.0"
+  new_per_run: 5
+  poll_interval: "11 */6 * * *"
+
+tests:
+  # `script:` resolves from the REPOSITORY ROOT — unlike `metadata.default` and
+  # `catalog.logo` above, which resolve against this spec's own directory.
+  - name: smoke
+    script: ripgrep/tests/smoke.star
+
+annotations:
+  # From the Phase 1.5 license gate:
+  #   $ gh api repos/BurntSushi/ripgrep/license --jq '.license.spdx_id'
+  #   Unlicense
+  # The shipped COPYING reads "dual-licensed under the Unlicense and MIT
+  # licenses"; the GitHub API surfaces only the UNLICENSE file.
+  org.opencontainers.image.licenses: "Unlicense OR MIT"
+
+announce:
+  # Spelled out, not derived from target.repository — the logical name and the
+  # physical path are related by convention only.
+  package: ripgrep/ripgrep
+  fork: ocx-contrib/index

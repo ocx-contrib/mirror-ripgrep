@@ -1,0 +1,116 @@
+# Repo-wide policy for the ripgrep mirror.
+#
+# NOT a spec: it has no name/target/source and is never loaded on its own.
+# Everything a package owns — name, target, source, assets, asset_type,
+# bin_scan, metadata, catalog, tests, versions, announce, annotations — stays
+# in ripgrep/mirror.yml.
+#
+# ⚠️ `extends:` is a SHALLOW merge of top-level keys. A spec that sets a key
+# below replaces that block OUTRIGHT — there is no per-key merge. `platforms:`
+# is where this bites: it carries BOTH the runner matrix and the container
+# legs, so a child that restates it to tweak one runner silently drops every
+# `containers:` entry. Nothing reds — the legs simply stop existing, and every
+# os.features claim in that spec goes back to being merely asserted. This repo
+# is single-package, so `platforms:` lives HERE and ripgrep/mirror.yml does not
+# restate it — the trap is structurally eliminated rather than merely avoided.
+
+skip_prereleases: true
+cascade: true
+
+# New package, so the fleet rule applies unconditionally. A cascade tag
+# (`latest`, `15`, `15.2`) re-points on every re-publish; without a build
+# segment the new manifest reuses the bare version tag and orphans the prior
+# digest for registry GC, breaking any `@sha256:` pin in a consumer's ocx.lock.
+# The `none` exception applies only where upstream versions ALREADY carry
+# semver build metadata — ripgrep tags bare semver (`15.2.0`), so it does not.
+build_timestamp: date
+
+verify:
+  github_asset_digest: true
+
+concurrency:
+  # Assets are ~1.7–2.2 MB archives around a single binary plus docs.
+  max_downloads: 8
+  max_bundles: 4
+  max_pushes: 2
+  rate_limit_ms: 100
+  max_retries: 3
+  compression_threads: 0
+
+# ─── Platform matrix ────────────────────────────────────────────────────────
+#
+# `os.features` states what an artifact REQUIRES OF THE HOST — it is not a
+# label for how it was built, and a musl target TRIPLE is not a musl
+# requirement. The two Linux keys here differ because their LINKAGE differs,
+# measured per arch on both ends of the range (evidence above
+# ripgrep/mirror.yml's `assets:`):
+#
+#   linux/amd64  — the only x86_64 Linux asset upstream ships is
+#                  `x86_64-unknown-linux-musl`, and it is static-pie: INTERP
+#                  segment count 0, zero DT_NEEDED, on 15.0.0 AND 15.2.0. It
+#                  requires nothing of the host → BARE key. `+libc.musl` would
+#                  be a false requirement that hid the package from every glibc
+#                  host it in fact runs on. A bare key claims universality, so
+#                  it must prove it: ubuntu (glibc) + alpine (musl) + fedora
+#                  (other glibc vintage). The ALPINE LEG IS THE PROOF — drop it
+#                  and the claim is merely asserted.
+#   linux/arm64  — the aarch64 asset carried here is the gnu one, because it is
+#                  the only aarch64 Linux build present across the WHOLE range
+#                  (`aarch64-unknown-linux-musl` first appears in 15.2.0 and is
+#                  absent at 15.0.0/15.1.0 — declaring it would resolve zero
+#                  assets on two of three in-range releases, which the pipeline
+#                  SILENTLY skips). It carries PT_INTERP
+#                  /lib/ld-linux-aarch64.so.1 and NEEDED libc.so.6 +
+#                  libgcc_s.so.1 → `+libc.glibc`. NO alpine leg: the binary
+#                  genuinely cannot load under musl, and the renderer rejects
+#                  an alpine leg on a glibc key at exit 65.
+#
+# Max glibc symbol version is GLIBC_2.18 on aarch64 (readelf -V), well under
+# ubuntu:24.04 and fedora:40, and both images carry libgcc_s.so.1 in the base
+# layer — no `containers[].setup` needed.
+#
+# Staged rollout (skill Phase 10): darwin and windows are pre-written and
+# commented out below and in `assets:`, uncommented one pass at a time once the
+# Linux legs are end-to-end green. Both a platform key AND its asset pattern
+# are commented together — a declared-but-unmatched platform still boots a real
+# runner and reports SUCCESS having tested nothing.
+platforms:
+  linux/amd64:
+    runner: ubuntu-latest
+    containers:
+      - { image: "ubuntu:24.04", shell: bash }
+      - { image: "alpine:3.20",  shell: sh }
+      - { image: "fedora:40",    shell: bash }
+  "linux/arm64+libc.glibc":
+    # arm64 container legs run natively — no qemu — so the runner arch must
+    # match the platform or the renderer reds the leg up front.
+    runner: ubuntu-24.04-arm
+    containers:
+      - { image: "ubuntu:24.04", shell: bash }
+      - { image: "fedora:40",    shell: bash }
+  # No `containers:` on darwin or windows — those runners have no Linux
+  # container engine, and the key is rejected at spec load.
+  #
+  # PASS 2 — darwin. Uncomment together with the two darwin `assets:` patterns.
+  # darwin/amd64:
+  #   # Intel slice tested on the arm64 macos-14 runner via Rosetta 2 —
+  #   # GitHub's native macos-13 Intel pool is exhausted and deadlocks push.
+  #   runner: macos-14
+  #   prefix: ["arch", "-x86_64"]
+  # darwin/arm64:
+  #   runner: macos-14
+  #   shell: bash
+  #
+  # PASS 3 — windows. Uncomment together with the two windows `assets:` patterns.
+  # windows/amd64:
+  #   runner: windows-latest
+  #   shell: pwsh
+  # windows/arm64:
+  #   # Native arm64 Windows runner — the amd64 pool cannot execute an ARM64 PE.
+  #   runner: windows-11-arm
+  #   shell: pwsh
+
+notify:
+  discord:
+    webhook_secret: OCX_MIRROR_DISCORD_HOOK
+    user_id: "227748867204972545"  # pinged in-message on failures
