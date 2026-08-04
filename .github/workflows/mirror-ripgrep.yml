@@ -6,7 +6,7 @@ name: ripgrep
 
 on:
   schedule:
-    - cron: '11 */6 * * *'
+    - cron: '17 0-23/6 * * *'
   workflow_dispatch:
   push:
     branches: [main]
