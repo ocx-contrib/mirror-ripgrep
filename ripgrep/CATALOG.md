@@ -29,17 +29,6 @@ The archive also ships the `rg.1` man page under `doc/` and shell completions
 for bash, zsh, fish and PowerShell under `complete/` — both are inside the
 bundle but neither is wired onto `PATH` or `MANPATH`.
 
-## Install with ocx
-
-```sh
-ocx install ocx.sh/ripgrep/ripgrep
-```
-
-```sh
-# or pin a specific version
-ocx install ocx.sh/ripgrep/ripgrep:15.2.0
-```
-
 ## Links
 
 - [ripgrep on GitHub](https://github.com/BurntSushi/ripgrep)
